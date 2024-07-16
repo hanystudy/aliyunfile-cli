@@ -92,21 +92,49 @@ def _read_byte_range(file_path, start, end):
         data = file.read(end - start)
     return data
 
+def _refresh_upload_url(context, upload_context):
+    slices = list(map(lambda slice: {"part_number": slice['part_number']}, upload_context.slices))
+    data = {
+        "upload_id": upload_context.upload_id,
+        "drive_id": context.group_id,
+        "part_info_list": slices,
+        "file_id": upload_context.file_id,
+    }
+    get_upload_url = f'https://{context.account_id}.api.aliyunfile.com/v2/file/get_upload_url'
+    headers = {
+        'Authorization': f'Bearer {context.token}',
+    }
+    response = requests.post(get_upload_url, data=json.dumps(data), headers=headers)
+    if response.status_code == 200:
+        res = response.json()
+        for index, item in enumerate(res['part_info_list']):
+            upload_context.slices[index]['upload_url'] = item['upload_url']
+    else:
+        logger.fatal('get upload_url failed!')
+        logger.fatal(response.status_code)
+        logger.fatal(response.text)
+        raise Exception('Failed to get upload url...')
+    return
+
 def _upload(context, upload_context):
     logger.info('uploading...')
     with open(context.file_path, 'rb') as f:
         pbar = tqdm(total=upload_context.file_size, unit='B', unit_scale=True, unit_divisor=1024)
         for slice in upload_context.slices:
             wrapped_file = _read_byte_range(context.file_path, slice['from'], slice['to'])
-            response = requests.put(slice['upload_url'], data=wrapped_file)
-            pbar.update(slice['to'] - slice['from'])
-            if response.status_code == 200:
-                slice['etag'] = response.headers['Etag']
-            else:
-                logger.fatal('upload failed!')
-                logger.fatal(response.status_code)
-                logger.fatal(response.text)
-                raise Exception('Failed to upload object...')
+            while True:
+                response = requests.put(slice['upload_url'], data=wrapped_file)
+                if response.status_code == 200:
+                    slice['etag'] = response.headers['Etag']
+                    pbar.update(slice['to'] - slice['from'])
+                    break
+                elif response.status_code == 403:
+                    _refresh_upload_url(context, upload_context)
+                else:
+                    logger.fatal('upload failed!')
+                    logger.fatal(response.status_code)
+                    logger.fatal(response.text)
+                    raise Exception('Failed to upload object...')
 
 def compute_crc64(file_path):
     crc64_func = crcmod.mkCrcFun(0x142F0E1EBA9EA3693, initCrc=0, xorOut=0xffffffffffffffff, rev=True)

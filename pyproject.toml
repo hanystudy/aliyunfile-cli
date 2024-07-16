@@ -1,6 +1,6 @@
 [project]
 name = "aliyunfile-cli"
-version = "1.0.2"
+version = "1.0.3"
 description = "A simple cli tool for the sick aliyunfile"
 authors = [{name = "Han Yi <hanystudy@gmail.com>"}]
 maintainers = [{name = "Han Yi <hanystudy@gmail.com>"}]
